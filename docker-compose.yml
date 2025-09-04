@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  wordpress1-website:
+    image: ghcr.io/babsyit/wordpress-ftp:latest
+    container_name: wordpress1_website
+    restart: unless-stopped
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    networks:
+      - traefik-network
+    environment:
+      WORDPRESS_DB_HOST: wordpress1-website-db
+      WORDPRESS_DB_USER: ${WP1_DB_USER}
+      WORDPRESS_DB_PASSWORD: ${WP1_DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${WP1_DB_NAME}
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_CACHE', true);
+        define('WP_REDIS_HOST', 'wordpress1-redis');
+    volumes:
+      - ./wordpress:/var/www/html
+    labels:
+      # Enable Traefik
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-network"
+
+      # HTTP router
+      - "traefik.http.routers.wordpress1.rule=Host(`${WP1_HOSTNAME}`)"
+      - "traefik.http.routers.wordpress1.entrypoints=web"
+
+      # HTTP → HTTPS redirect
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.wordpress1.middlewares=redirect-to-https@docker"
+
+      # HTTPS router
+      - "traefik.http.routers.wordpress1-secured.rule=Host(`${WP1_HOSTNAME}`)"
+      - "traefik.http.routers.wordpress1-secured.entrypoints=websecure"
+      - "traefik.http.routers.wordpress1-secured.tls=true"
+      - "traefik.http.routers.wordpress1-secured.tls.certresolver=letsencrypt"
+
+      # Service port
+      - "traefik.http.services.wordpress1.loadbalancer.server.port=80"
+
+  wordpress1-website-db:
+    image: mysql:8.0
+    container_name: wordpress1_website_db
+    restart: unless-stopped
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"    
+    networks:
+      - traefik-network
+    environment:
+      MYSQL_DATABASE: ${WP1_DB_NAME}
+      MYSQL_USER: ${WP1_DB_USER}
+      MYSQL_PASSWORD: ${WP1_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${WP1_DB_ROOT_PASSWORD}
+    volumes:
+      - ./db:/var/lib/mysql
+
+  wordpress1-redis:
+    image: redis:alpine
+    container_name: wordpress1_redis
+    restart: unless-stopped
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"    
+    networks:
+      - traefik-network
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - ./redis:/data
+
+networks:
+  traefik-network:
+    external: true
